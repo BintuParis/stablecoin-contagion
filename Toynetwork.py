@@ -1,3 +1,7 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import networkx as nx
+
 class Stablecoin:
     def __init__(self, name, total_supply, external_assets, holdings):
         self.name, self.total_supply, self.external_assets, self.original_external_assets, self.holdings = name, total_supply, external_assets, external_assets, holdings
@@ -76,17 +80,94 @@ for coin in coins.values():
 def apply_shock(coins, target_coin, shock_percentage = 0.10):
     if target_coin in coins.keys():
             coins[target_coin].external_assets *= (1 - shock_percentage)
-    for coin in coins.values():
-        peg_value = coin.get_peg_value(coins)
-        print(f"{coin.name} peg: ${peg_value:.3f}")
+    
+    max_iter = 1000
+    for iteration in range(max_iter):
+        old_pegs = {}
+        for name, coin in coins.items():
+            old_pegs[name] = coin.get_peg_value(coins)
+
+        converged = True
+        for name, coin in coins.items():
+            new_peg = coin.get_peg_value(coins)
+            if abs(new_peg - old_pegs[name]) > 1e-6:
+                converged = False
+                break
+
+        if converged:
+            print(f"Converged after {iteration+1} iterations")
+            break
 
 def reset_all_coins(coins):
     for coin in coins.values():
         coin.reset()
 
-apply_shock(coins, "CoinA", 0.10)
-print("\nAfter reset:")
-reset_all_coins(coins)
-for coin in coins.values():
-    print(f"{coin.name} peg: ${coin.get_peg_value(coins):.3f}")
+def get_dependency_matrix(coins):
+    coin_names = list(coins.keys())
+    n = len(coin_names)
+    matrix = np.zeros((n, n))
 
+    for i, holder_name in enumerate(coin_names):
+        holder_coin = coins[holder_name]
+        total_reserves = holder_coin.get_reserve_value(coins)
+        
+        for asset_name, amount in holder_coin.holdings.items():
+            
+                j = coin_names.index(asset_name)
+                matrix[i][j] = amount / total_reserves
+
+    return matrix, coin_names
+
+def run_scenario(coins, scenario_name, shock_dict):
+    print(scenario_name)
+    for name, pct in shock_dict.items():
+        coins[name].external_assets *= (1 - pct) 
+    results = {}
+    for name, coin in coins.items():
+        results[name] = coin.get_peg_value(coins)
+    reset_all_coins(coins)
+    return results
+
+s1 = run_scenario(coins, "Scenario 1: CoinA -10%", {"CoinA": 0.10})
+s2 = run_scenario(coins, "Scenario 2: ETH crashes 40%", {"CoinB": 0.40, "CoinC": 0.40, "CoinE": 0.40})
+s3 = run_scenario(coins, "Scenario 3: CoinB fails", {"CoinB": 1.0})
+
+scenarios = {
+    "Scenario 1": s1,
+    "Scenario 2": s2,
+    "Scenario 3": s3 }
+
+def visualise_network(coins):
+    G = nx.DiGraph()
+    for name in coins.keys():
+        G.add_node(name)
+    for holder_name, coin in coins.items():
+        for asset_name, amount in coin.holdings.items():
+            G.add_edge(holder_name, asset_name, weight=amount)
+    nx.draw(G, with_labels = True)
+    plt.show()
+
+def visualise_scenarios(scenarios_dict):
+    coin_names = list(scenarios_dict["Scenario 1"].keys())
+    scenario_names = list(scenarios_dict.keys())
+    
+    plt.figure(figsize=(10,6))
+    x = np.arange(len(coin_names))
+    width = 0.25
+    
+    for i, scenario_name in enumerate(scenario_names):
+        values = [scenarios_dict[scenario_name][coin] for coin in coin_names]
+        plt.bar(x + i*width, values, width, label=scenario_name)
+
+    plt.xlabel('Coins')
+    plt.ylabel('Peg Value ($)')
+    plt.title('Stablecoin Peg Values Across Scenarios')
+    plt.xticks(x + width, coin_names)
+    plt.axhline(y=1.0, color = 'r', linestyle = '--', alpha = 0.5)
+    plt.legend()
+    plt.show()
+ 
+
+visualise_scenarios(scenarios)
+
+    
